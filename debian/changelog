@@ -1,5 +1,5 @@
-entr (2.4-1) unstable; urgency=low
+entr (2.5-1) unstable; urgency=low
 
-  * Initial release (Closes: #nnnn)  <nnnn is the bug number of your ITP>
+  * Initial release (Closes: #733563)
 
- -- Yuri D'Elia <wavexx@thregr.org>  Fri, 27 Dec 2013 18:44:28 +0100
+ -- Yuri D'Elia <wavexx@thregr.org>  Tue, 31 Dec 2013 18:23:31 +0100

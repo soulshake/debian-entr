@@ -2,8 +2,8 @@ Source: entr
 Section: misc
 Priority: optional
 Maintainer: Yuri D'Elia <wavexx@thregr.org>
-Build-Depends: debhelper (>= 8.0.0)
-Standards-Version: 3.9.4
+Build-Depends: debhelper (>= 9.0.0)
+Standards-Version: 3.9.5
 Homepage: http://entrproject.org/
 Vcs-Hg: https://bitbucket.org/eradman/entr
 Vcs-Browser: https://bitbucket.org/eradman/entr
