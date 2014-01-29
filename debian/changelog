@@ -1,3 +1,13 @@
+entr (2.6-1) unstable; urgency=low
+
+  * Update to upstream 2.6:
+    - New '-c' flag to clear the screen.
+    - '/_' path replacement.
+  * Override upstream copy and use 'libbsd' overlay.
+  * Build support for kFreeBSD.
+
+ -- Yuri D'Elia <wavexx@thregr.org>  Wed, 29 Jan 2014 16:29:25 +0100
+
 entr (2.5-1) unstable; urgency=low
 
   * Initial release (Closes: #733563)

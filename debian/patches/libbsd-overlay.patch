@@ -1,0 +1,21 @@
+--- a/Makefile.linux
++++ b/Makefile.linux
+@@ -1,5 +1,6 @@
+-CFLAGS += -D_GNU_SOURCE -D_LINUX_PORT -Imissing
++CFLAGS += -D_GNU_SOURCE -Imissing $(shell pkg-config --cflags libbsd-overlay)
++LDFLAGS += $(shell pkg-config --libs libbsd-ctor)
+ MANPREFIX ?= ${PREFIX}/share/man
+-EXTRA_SRC = missing/strlcpy.c missing/kqueue.c
++EXTRA_SRC = missing/kqueue.c
+ 
+ include Makefile.bsd
+--- a/Makefile.kfreebsd
++++ b/Makefile.kfreebsd
+@@ -1,5 +1,5 @@
+-CFLAGS += -D_GNU_SOURCE -Imissing
++CFLAGS += -D_GNU_SOURCE $(shell pkg-config --cflags libbsd-overlay)
++LDFLAGS += $(shell pkg-config --libs libbsd-overlay)
+ MANPREFIX ?= ${PREFIX}/share/man
+-EXTRA_SRC = missing/strlcpy.c
+ 
+ include Makefile.bsd
