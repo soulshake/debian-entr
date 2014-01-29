@@ -1,3 +1,8 @@
+Description: Override upstream copy and use libbsd
+  Avoid using local copy of strlcpy, use the libbsd library in overlay mode
+  instead on our supported targets.
+Author: Yuri D'Elia <wavexx@thregr.org>
+Forwarded: not-needed
 --- a/Makefile.linux
 +++ b/Makefile.linux
 @@ -1,5 +1,6 @@
