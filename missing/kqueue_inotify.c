@@ -15,6 +15,8 @@
 
 #include <sys/inotify.h>
 #include <sys/event.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include <errno.h>
 #include <limits.h>
@@ -32,7 +34,7 @@
 
 extern WatchFile **files;
 
-/* utility forwards */
+/* forwards */
 
 static WatchFile * file_by_descriptor(int fd);
 
@@ -53,6 +55,7 @@ file_by_descriptor(int wd) {
 
 #define EVENT_SIZE (sizeof (struct inotify_event))
 #define EVENT_BUF_LEN (32 * (EVENT_SIZE + 16))
+#define IN_ALL IN_CLOSE_WRITE|IN_DELETE_SELF|IN_MODIFY|IN_MOVE_SELF|IN_ATTRIB
 
 /*
  * Conveniently inotify and kqueue ids both have the type `int`
@@ -80,6 +83,7 @@ kevent(int kq, const struct kevent *changelist, int nchanges, struct
 	const struct kevent *kev;
 	int ignored;
 	struct pollfd pfd;
+	struct stat sb;
 
 	if (nchanges > 0) {
 		ignored = 0;
@@ -92,7 +96,7 @@ kevent(int kq, const struct kevent *changelist, int nchanges, struct
 			}
 			else if (kev->flags & EV_ADD) {
 				wd = inotify_add_watch(kq /* ifd */, file->fn,
-				    IN_CLOSE_WRITE|IN_DELETE_SELF|IN_MODIFY|IN_MOVE_SELF);
+				    IN_ALL);
 				if (wd < 0)
 					return -1;
 				close(file->fd);
@@ -109,8 +113,6 @@ kevent(int kq, const struct kevent *changelist, int nchanges, struct
 	if (timeout != 0 && (poll(&pfd, 1, timeout->tv_nsec/1000000) == 0))
 		return 0;
 
-	/* Consolidate events over 50ms since some Linux apps write to a
-	   file before deleting it */
 	n = 0;
 	do {
 		pos = 0;
@@ -126,16 +128,20 @@ kevent(int kq, const struct kevent *changelist, int nchanges, struct
 			iev = (struct inotify_event *) &buf[pos];
 			pos += EVENT_SIZE + iev->len;
 
-			#ifdef DEBUG
-			fprintf(stderr, "wd: %d mask: 0x%x\n", iev->wd, iev->mask);
-			#endif
-
 			/* convert iev->mask; to comparable kqueue flags */
 			fflags = 0;
 			if (iev->mask & IN_DELETE_SELF) fflags |= NOTE_DELETE;
 			if (iev->mask & IN_CLOSE_WRITE) fflags |= NOTE_WRITE;
 			if (iev->mask & IN_MOVE_SELF)   fflags |= NOTE_RENAME;
+			if (iev->mask & IN_ATTRIB) {
+				if ((fstat(iev->wd, &sb) == -1) && errno == ENOENT)
+					fflags |= NOTE_DELETE;
+			}
 			if (fflags == 0) continue;
+
+			/* merge events if we're not acting on a new file descriptor */
+			if ((n > 0) && (eventlist[n-1].ident == iev->wd))
+				fflags |= eventlist[--n].fflags;
 
 			eventlist[n].ident = iev->wd;
 			eventlist[n].filter = EVFILT_VNODE;
@@ -143,7 +149,8 @@ kevent(int kq, const struct kevent *changelist, int nchanges, struct
 			eventlist[n].fflags = fflags;
 			eventlist[n].data = 0;
 			eventlist[n].udata = file_by_descriptor(iev->wd);
-			n++;
+			if (eventlist[n].udata)
+				n++;
 		}
 	}
 	while ((poll(&pfd, 1, 50) > 0));

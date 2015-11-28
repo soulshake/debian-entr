@@ -33,7 +33,6 @@ struct {
 		struct kevent List[32];
 		int nset;
 		int nlist;
-		int decrement;
 	} event;
 	struct {
 		int pid;
@@ -44,6 +43,9 @@ struct {
 		int fd;
 		const char *path;
 	} open;
+	struct {
+		int count;
+	} exit;
 } ctx;
 
 /* test runner */
@@ -71,18 +73,16 @@ void reset_state() {
 	optind = 1;
 
 	/* initialize global data */
-	memset(&fifo, 0, sizeof(fifo));
-	restart_mode = 0;
-	clear_mode = 0;
-	files = malloc(sizeof(WatchFile *) * max_files);
+	clear_opt = 0;
+	dirwatch_opt = 0;
+	postpone_opt = 0;
+	restart_opt = 0;
+	leading_edge = 0;
+	files = calloc(max_files, sizeof(WatchFile *));
 	for (i=0; i<max_files; i++)
-		files[i] = malloc(sizeof(WatchFile));
-
+		files[i] = calloc(1, sizeof(WatchFile));
 	/* initialize test context */
-	for (i=0; i<max_files; i++)
-		memset(files[i], 0, sizeof(WatchFile));
 	memset(&ctx, 0, sizeof(ctx));
-	ctx.event.decrement = 1;
 }
 
 void sighandler(int signum) {
@@ -114,14 +114,14 @@ fake_realpath(const char *pathname, char *resolved) {
 	return resolved;
 }
 
+int
+fake_list_dir(char *path) {
+	return 2;
+}
+
 pid_t
 fake_fork() {
 	return 0; /* pretend to be the child */
-}
-
-int
-fake_mkfifo(const char *path, mode_t mode) {
-	return 0; /* success */
 }
 
 void
@@ -130,9 +130,16 @@ fake_free(void *ptr) {
 
 /* mock objects */
 
+/*
+ * kevent(2) is used to change and retrieve events.
+ * This version always returns at most 2 events
+ */
 int
 fake_kevent(int kq, const struct kevent *changelist, int nchanges, struct
     kevent *eventlist, int nevents, const struct timespec *timeout) {
+	int decrement;
+	decrement = MIN(ctx.event.nlist, 2);
+
 	/* record each event that the application sets */
 	if (nchanges > 0) {
 		memcpy(&ctx.event.Set[ctx.event.nset], changelist,
@@ -144,8 +151,8 @@ fake_kevent(int kq, const struct kevent *changelist, int nchanges, struct
 	if ((nevents > 0) && (ctx.event.nlist > 0)) {
 		memcpy(eventlist, &ctx.event.List,
 		    sizeof(struct kevent) * ctx.event.nlist);
-		ctx.event.nlist -= ctx.event.decrement;
-		return ctx.event.decrement;
+		ctx.event.nlist -= decrement;
+		return decrement;
 	}
 	/* no more events, use bogus return code to cause the main loop to exit */
 	return -2;
@@ -154,7 +161,7 @@ fake_kevent(int kq, const struct kevent *changelist, int nchanges, struct
 /* spies */
 
 int
-fake_kill(pid_t pid, int sig) {
+fake_killpg(pid_t pid, int sig) {
 	ctx.signal.pid = pid;
 	ctx.signal.sig = sig;
 	ctx.signal.count++;
@@ -176,6 +183,10 @@ fake_open(const char *path, int flags, ...) {
 	return ctx.open.fd;
 }
 
+void
+fake_errx(int eval, const char *msg, ...) {
+	ctx.exit.count++;
+}
 
 /* tests */
 
@@ -217,14 +228,41 @@ int process_input_02() {
 }
 
 /*
+ * Read a list of use supplied files and directories
+ */
+int process_input_03() {
+	int n_files;
+	FILE *fake;
+	char input[] = "dir1\nfile1\nfile2\nfile3";
+
+	dirwatch_opt = 1;
+	fake = fmemopen(input, strlen(input), "r");
+	n_files = process_input(fake, files, 32);
+
+	ok(n_files == 5);
+	ok(strcmp(files[0]->fn, "dir1") == 0);
+	ok(strcmp(files[1]->fn, "file1") == 0);
+	ok(strcmp(files[2]->fn, ".") == 0);
+	ok(strcmp(files[3]->fn, "file2") == 0);
+	ok(strcmp(files[4]->fn, "file3") == 0);
+
+	ok(files[0]->is_dir == 1); /* dir1  */
+	ok(files[1]->is_dir == 0); /* file1 */
+	ok(files[2]->is_dir == 1); /* .     */
+	ok(files[3]->is_dir == 0); /* file2 */
+	ok(files[4]->is_dir == 0); /* file3 */
+	return 0;
+}
+
+/*
  * Remove a file
  */
 int watch_fd_exec_01() {
 	int kq = kqueue();
 	static char *argv[] = { "prog", "arg1", "arg2", NULL };
-	static char fn[] = "/dev/null";
 
-	strlcpy(files[0]->fn, fn, sizeof(files[0]->fn));
+	postpone_opt = 1;
+	strlcpy(files[0]->fn, "arg1", sizeof(files[0]->fn));
 	watch_file(kq, files[0]);
 
 	/* event 1/1: 4 (-4) 0x21 0x1 0 0x84d5e800 */
@@ -258,6 +296,7 @@ int watch_fd_exec_01() {
 	ok(strcmp(ctx.exec.argv[0], "prog") == 0);
 	ok(strcmp(ctx.exec.argv[1], "arg1") == 0);
 	ok(strcmp(ctx.exec.argv[2], "arg2") == 0);
+	ok(ctx.exit.count == 0);
 	return 0;
 }
 
@@ -267,9 +306,9 @@ int watch_fd_exec_01() {
 int watch_fd_exec_02() {
 	int kq = kqueue();
 	static char *argv[] = { "prog", "arg1", "arg2", NULL };
-	static char fn[] = "/dev/null";
 
-	strlcpy(files[0]->fn, fn, sizeof(files[0]->fn));
+	postpone_opt = 1;
+	strlcpy(files[0]->fn, "main.py", sizeof(files[0]->fn));
 	watch_file(kq, files[0]);
 
 	ctx.event.nlist = 1;
@@ -286,29 +325,34 @@ int watch_fd_exec_02() {
 
 	ok(ctx.exec.count == 0);
 	ok(ctx.exec.file == 0);
+	ok(ctx.exit.count == 0);
 	return 0;
 }
 
 /*
- * Write to two files at once
+ * Write to three files at once
  */
 int watch_fd_exec_03() {
 	int kq = kqueue();
 	static char *argv[] = { "prog", "arg1", "arg2", NULL };
-	static char fn[] = "/dev/null";
 
-	strlcpy(files[0]->fn, fn, sizeof(files[0]->fn));
+	postpone_opt = 1;
+	strlcpy(files[0]->fn, "main.py", sizeof(files[0]->fn));
 	watch_file(kq, files[0]);
-	strlcpy(files[1]->fn, fn, sizeof(files[1]->fn));
+	strlcpy(files[1]->fn, "util.py", sizeof(files[1]->fn));
 	watch_file(kq, files[1]);
+	strlcpy(files[2]->fn, "app.py", sizeof(files[2]->fn));
+	watch_file(kq, files[2]);
 
-	ctx.event.nlist = 2;
+	ctx.event.nlist = 3;
 	EV_SET(&ctx.event.List[0], files[0]->fd, EVFILT_VNODE, 0, NOTE_WRITE, 0, files[0]);
 	EV_SET(&ctx.event.List[1], files[1]->fd, EVFILT_VNODE, 0, NOTE_WRITE, 0, files[1]);
+	EV_SET(&ctx.event.List[2], files[1]->fd, EVFILT_VNODE, 0, NOTE_WRITE, 0, files[2]);
 
 	watch_loop(kq, argv);
 
-	ok(ctx.event.nset == 2);
+	ok(strcmp(leading_edge->fn, "main.py") == 0);
+	ok(ctx.event.nset == 3);
 	ok(ctx.event.Set[0].ident);
 	ok(ctx.event.Set[0].filter == EVFILT_VNODE);
 	ok(ctx.event.Set[0].flags == (EV_CLEAR|EV_ADD)); /* open */
@@ -322,6 +366,7 @@ int watch_fd_exec_03() {
 	ok(strcmp(ctx.exec.argv[0], "prog") == 0);
 	ok(strcmp(ctx.exec.argv[1], "arg1") == 0);
 	ok(strcmp(ctx.exec.argv[2], "arg2") == 0);
+	ok(ctx.exit.count == 0);
 	return 0;
 }
 
@@ -331,13 +376,12 @@ int watch_fd_exec_03() {
 int watch_fd_exec_04() {
 	int kq = kqueue();
 	static char *argv[] = { "prog", "arg1", "arg2", NULL };
-	static char fn[] = "/dev/null";
 
-	strlcpy(files[0]->fn, fn, sizeof(files[0]->fn));
+	postpone_opt = 1;
+	strlcpy(files[0]->fn, "arg1", sizeof(files[0]->fn));
 	watch_file(kq, files[0]);
 
 	ctx.event.nlist = 2;
-	ctx.event.decrement = 2;
 	EV_SET(&ctx.event.List[0], files[0]->fd, EVFILT_VNODE, 0, NOTE_WRITE, 0, files[0]);
 	EV_SET(&ctx.event.List[1], files[0]->fd, EVFILT_VNODE, 0, NOTE_DELETE, 0, files[0]);
 
@@ -368,6 +412,7 @@ int watch_fd_exec_04() {
 	ok(strcmp(ctx.exec.argv[0], "prog") == 0);
 	ok(strcmp(ctx.exec.argv[1], "arg1") == 0);
 	ok(strcmp(ctx.exec.argv[2], "arg2") == 0);
+	ok(ctx.exit.count == 0);
 	return 0;
 }
 
@@ -377,13 +422,12 @@ int watch_fd_exec_04() {
 int watch_fd_exec_05() {
 	int kq = kqueue();
 	static char *argv[] = { "prog", "arg1", "arg2", NULL };
-	static char fn[] = "/dev/null";
 
-	strlcpy(files[0]->fn, fn, sizeof(files[0]->fn));
+	postpone_opt = 1;
+	strlcpy(files[0]->fn, "arg1", sizeof(files[0]->fn));
 	watch_file(kq, files[0]);
 
 	ctx.event.nlist = 1;
-	ctx.event.decrement = 1;
 	EV_SET(&ctx.event.List[0], files[0]->fd, EVFILT_VNODE, 0, NOTE_RENAME, 0, files[0]);
 
 	watch_loop(kq, argv);
@@ -413,19 +457,124 @@ int watch_fd_exec_05() {
 	ok(strcmp(ctx.exec.argv[0], "prog") == 0);
 	ok(strcmp(ctx.exec.argv[1], "arg1") == 0);
 	ok(strcmp(ctx.exec.argv[2], "arg2") == 0);
+	ok(ctx.exit.count == 0);
 	return 0;
 }
 
 /*
- * FIFO mode; triggerd by a leading '+' on the filename
+ * Add a file to a directory
  */
-int set_fifo_01() {
-	static char *argv[] = { "entr", "+notify", NULL };
+int watch_fd_exec_06() {
+	int kq = kqueue();
+	static char *argv[] = { "prog", "arg1", "arg2", NULL };
 
-	ok(set_fifo(argv+1));
-	ok(ctx.open.fd > 0);
-	ok(strcmp(fifo.fn, "notify") == 0);
-	ok(fifo.fd == ctx.open.fd);
+	postpone_opt = 1;
+	strlcpy(files[0]->fn, ".", sizeof(files[0]->fn));
+	files[0]->is_dir = 1;
+	files[0]->file_count = 1;
+	strlcpy(files[1]->fn, "run.sh", sizeof(files[0]->fn));
+	watch_file(kq, files[0]);
+	watch_file(kq, files[1]);
+
+	dirwatch_opt = 1;
+	ctx.event.nlist = 1;
+	EV_SET(&ctx.event.List[0], files[0]->fd, EVFILT_VNODE, 0, NOTE_WRITE, 0, files[0]);
+
+	watch_loop(kq, argv);
+
+	ok(ctx.event.nset == 2);
+	ok(ctx.event.Set[0].ident);
+	ok(ctx.event.Set[0].filter == EVFILT_VNODE);
+	ok(ctx.event.Set[0].flags == (EV_CLEAR|EV_ADD)); /* open */
+	ok(ctx.event.Set[0].fflags == (NOTE_ALL));
+	ok(ctx.event.Set[0].udata == files[0]->fn);
+
+	ok(ctx.event.Set[1].ident);
+	ok(ctx.event.Set[1].filter == EVFILT_VNODE);
+	ok(ctx.event.Set[1].flags == (EV_CLEAR|EV_ADD)); /* open */
+	ok(ctx.event.Set[1].fflags == (NOTE_ALL));
+	ok(ctx.event.Set[1].udata == files[1]->fn);
+
+	ok(ctx.exec.count == 1);
+	ok(ctx.exec.file != 0);
+	ok(strcmp(ctx.exec.file, "prog") == 0);
+	ok(strcmp(ctx.exec.argv[0], "prog") == 0);
+	ok(strcmp(ctx.exec.argv[1], "arg1") == 0);
+	ok(strcmp(ctx.exec.argv[2], "arg2") == 0);
+	ok(ctx.exit.count == 1);
+	return 0;
+}
+
+/*
+ * Add a file to a directory and write to a file
+ */
+int watch_fd_exec_07() {
+	int kq = kqueue();
+	static char *argv[] = { "prog", "arg1", "arg2", NULL };
+
+	postpone_opt = 1;
+	strlcpy(files[0]->fn, ".", sizeof(files[0]->fn));
+	files[0]->is_dir = 1;
+	strlcpy(files[1]->fn, "run.sh", sizeof(files[0]->fn));
+	watch_file(kq, files[0]);
+	watch_file(kq, files[1]);
+
+	dirwatch_opt = 1;
+	ctx.event.nlist = 2;
+	EV_SET(&ctx.event.List[0], files[0]->fd, EVFILT_VNODE, 0, NOTE_WRITE, 0, files[0]);
+	EV_SET(&ctx.event.List[1], files[1]->fd, EVFILT_VNODE, 0, NOTE_WRITE, 0, files[1]);
+
+	watch_loop(kq, argv);
+
+	ok(ctx.event.nset == 2);
+	ok(ctx.event.Set[0].ident);
+	ok(ctx.event.Set[0].filter == EVFILT_VNODE);
+	ok(ctx.event.Set[0].flags == (EV_CLEAR|EV_ADD)); /* open */
+	ok(ctx.event.Set[0].fflags == (NOTE_ALL));
+	ok(ctx.event.Set[0].udata == files[0]->fn);
+
+	ok(ctx.event.Set[1].ident);
+	ok(ctx.event.Set[1].filter == EVFILT_VNODE);
+	ok(ctx.event.Set[1].flags == (EV_CLEAR|EV_ADD)); /* open */
+	ok(ctx.event.Set[1].fflags == (NOTE_ALL));
+	ok(ctx.event.Set[1].udata == files[1]->fn);
+
+	ok(ctx.exec.count == 1);
+	ok(ctx.exec.file != 0);
+	ok(strcmp(ctx.exec.file, "prog") == 0);
+	ok(strcmp(ctx.exec.argv[0], "prog") == 0);
+	ok(strcmp(ctx.exec.argv[1], "arg1") == 0);
+	ok(strcmp(ctx.exec.argv[2], "arg2") == 0);
+	ok(ctx.exit.count == 1);
+	return 0;
+}
+
+/*
+ * Write to a file in directory watch mode
+ */
+int watch_fd_exec_08() {
+	int kq = kqueue();
+	static char *argv[] = { "prog", "arg1", "arg2", NULL };
+
+	postpone_opt = 1;
+	dirwatch_opt = 1;
+	strlcpy(files[0]->fn, "src", sizeof(files[0]->fn));
+	files[0]->is_dir = 1;
+	watch_file(kq, files[0]);
+	strlcpy(files[1]->fn, "main.py", sizeof(files[1]->fn));
+	watch_file(kq, files[1]);
+
+	ctx.event.nlist = 2;
+	EV_SET(&ctx.event.List[0], files[0]->fd, EVFILT_VNODE, 0, NOTE_WRITE, 0, files[0]);
+	EV_SET(&ctx.event.List[1], files[1]->fd, EVFILT_VNODE, 0, NOTE_WRITE, 0, files[1]);
+
+	watch_loop(kq, argv);
+
+	ok(ctx.event.nset == 2);
+	ok(ctx.exec.count == 1);
+	ok(ctx.exec.file != 0);
+	ok(ctx.exit.count == 1);
+	ok(strcmp(leading_edge->fn, "main.py") == 0);
 
 	return 0;
 }
@@ -440,8 +589,9 @@ int set_options_01() {
 	argv_offset = set_options(argv);
 
 	ok(argv_offset == 1);
-	ok(restart_mode == 0);
-	ok(clear_mode == 0);
+	ok(restart_opt == 0);
+	ok(clear_opt == 0);
+	ok(dirwatch_opt == 0);
 	return 0;
 }
 
@@ -455,7 +605,10 @@ int set_options_02() {
 	argv_offset = set_options(argv);
 
 	ok(argv_offset == 2);
-	ok(restart_mode == 1);
+	ok(restart_opt == 1);
+	ok(clear_opt == 0);
+	ok(dirwatch_opt == 0);
+	ok(postpone_opt == 0);
 	return 0;
 }
 
@@ -469,23 +622,42 @@ int set_options_03() {
 	argv_offset = set_options(argv);
 
 	ok(argv_offset == 2);
-	ok(restart_mode == 0);
-	ok(clear_mode == 1);
+	ok(restart_opt == 0);
+	ok(clear_opt == 1);
+	ok(dirwatch_opt == 0);
+	ok(postpone_opt == 0);
+	return 0;
+}
+
+/*
+ * Parse command line arguments with the directory watch option
+ */
+int set_options_04() {
+	int argv_offset;
+	char *argv[] = { "entr", "-d", "ruby", "test4.rb", NULL };
+	
+	argv_offset = set_options(argv);
+
+	ok(argv_offset == 2);
+	ok(restart_opt == 0);
+	ok(clear_opt == 0);
+	ok(dirwatch_opt == 1);
+	ok(postpone_opt == 0);
 	return 0;
 }
 
 /*
  * Ensure that command line arguments are not confused with utility arguments
  */
-int set_options_04() {
+int set_options_05() {
 	int argv_offset;
 	char *argv[] = { "entr", "ls", "-r", "-c", NULL };
 	
 	argv_offset = set_options(argv);
 
 	ok(argv_offset == 1);
-	ok(restart_mode == 0);
-	ok(clear_mode == 0);
+	ok(restart_opt == 0);
+	ok(clear_opt == 0);
 	return 0;
 }
 
@@ -495,15 +667,15 @@ int set_options_04() {
 int watch_fd_restart_01() {
 	int kq = kqueue();
 	char *argv[] = { "ruby", "main.rb", NULL };
-	static char fn[] = "/dev/null";
 
-	restart_mode = 1;
-	strlcpy(files[0]->fn, fn, sizeof(files[0]->fn));
+	restart_opt = 1;
+	strlcpy(files[0]->fn, "main.rb", sizeof(files[0]->fn));
 	watch_file(kq, files[0]);
 
 	ctx.event.nlist = 0;
 	watch_loop(kq, argv);
 
+	ok(strcmp(leading_edge->fn, "main.rb") == 0);
 	ok(ctx.event.nset == 1);
 	ok(ctx.event.Set[0].ident);
 	ok(ctx.event.Set[0].filter == EVFILT_VNODE);
@@ -525,10 +697,9 @@ int watch_fd_restart_01() {
 int watch_fd_restart_02() {
 	int kq = kqueue();
 	char *argv[] = { "ruby", "main.rb", NULL };
-	static char fn[] = "/dev/null";
 
-	restart_mode = 1;
-	strlcpy(files[0]->fn, fn, sizeof(files[0]->fn));
+	restart_opt = 1;
+	strlcpy(files[0]->fn, "main.rb", sizeof(files[0]->fn));
 	watch_file(kq, files[0]);
 	child_pid = 222;
 
@@ -565,37 +736,39 @@ int watch_fd_restart_02() {
 	return 0;
 }
 /*
- * Substitue '/_' with the first entry supplied via STDIN
+ * Substitue '/_' with the first file that leading_edge
  */
-int run_script_01() {
+int run_utility_01() {
 	static char *argv[] = { "psql", "-f", "/_", NULL };
-	char input[] = "my.sql\ntest.sql";
+	char input[] = "one.sql\ntwo.sql";
 	FILE *fake;
 
 	fake = fmemopen(input, strlen(input), "r");
 	(void) process_input(fake, files, 3);
-	run_script(argv);
+	leading_edge = files[1];
+	run_utility(argv);
 
 	ok(ctx.exec.count == 1);
 	ok(ctx.exec.file != 0);
 	ok(strcmp(ctx.exec.file, "psql") == 0);
 	ok(strcmp(ctx.exec.argv[0], "psql") == 0);
 	ok(strcmp(ctx.exec.argv[1], "-f") == 0);
-	ok(strcmp(ctx.exec.argv[2], "/home/user/my.sql") == 0);
+	ok(strcmp(ctx.exec.argv[2], "/home/user/two.sql") == 0);
 	return 0;
 }
 
 /*
  * Substitue only the first occurance of '/_'
  */
-int run_script_02() {
+int run_utility_02() {
 	static char *argv[] = { "/_", "/_", NULL };
 	char input[] = "one.sh\ntwo.sh";
 	FILE *fake;
 
 	fake = fmemopen(input, strlen(input), "r");
 	(void) process_input(fake, files, 3);
-	run_script(argv);
+	leading_edge = files[0];
+	run_utility(argv);
 
 	ok(ctx.exec.count == 1);
 	ok(ctx.exec.file != 0);
@@ -612,34 +785,39 @@ int test_main(int argc, char *argv[]) {
 	 signal(SIGSEGV, sighandler);
 
 	/* set up pointers to test doubles */
-	_stat = fake_stat;
-	_kevent = fake_kevent;
-	_kill = fake_kill;
-	_waitpid = fake_waitpid;
-	_execvp = fake_execvp;
-	_fork = fake_fork;
-	_mkfifo = fake_mkfifo;
-	_open = fake_open;
-	_realpath = fake_realpath;
-	_free = fake_free;
+	xstat = fake_stat;
+	xkevent = fake_kevent;
+	xkillpg = fake_killpg;
+	xwaitpid = fake_waitpid;
+	xexecvp = fake_execvp;
+	xfork = fake_fork;
+	xopen = fake_open;
+	xrealpath = fake_realpath;
+	xfree = fake_free;
+	xerrx = fake_errx;
+	xlist_dir = fake_list_dir;
 
 	/* all tests */
 	run(process_input_01);
 	run(process_input_02);
+	run(process_input_03);
 	run(watch_fd_exec_01);
 	run(watch_fd_exec_02);
 	run(watch_fd_exec_03);
 	run(watch_fd_exec_04);
 	run(watch_fd_exec_05);
-	run(set_fifo_01);
+	run(watch_fd_exec_06);
+	run(watch_fd_exec_07);
+	run(watch_fd_exec_08);
 	run(set_options_01);
 	run(set_options_02);
 	run(set_options_03);
 	run(set_options_04);
+	run(set_options_05);
 	run(watch_fd_restart_01);
 	run(watch_fd_restart_02);
-	run(run_script_01);
-	run(run_script_02);
+	run(run_utility_01);
+	run(run_utility_02);
 
 	/* TODO: find out how we broke stdout */
 	fprintf(stderr, "%d of %d tests PASSED\n", tests_run-failures, tests_run);
