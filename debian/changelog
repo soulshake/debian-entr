@@ -1,3 +1,10 @@
+entr (3.3-1~exp1) experimental; urgency=low
+
+  * New upstream release (Closes: #788530)
+    - Refresh patch to match the end result the patch created in 2.6
+
+ -- Otto Kekäläinen <otto@seravo.fi>  Sun, 29 Nov 2015 00:20:39 +0200
+
 entr (2.6-1) unstable; urgency=low
 
   * Update to upstream 2.6:
