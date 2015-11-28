@@ -2,7 +2,9 @@ Description: Override upstream copy and use libbsd
   Avoid using local copy of strlcpy, use the libbsd library in overlay mode
   instead on our supported targets.
   .
-  Updated by Otto Kekäläinen after 3.3 import to match the situation at 2.6.
+  Updated by Otto Kekäläinen after 3.3 import to match the situation at 2.6,
+  but dropped libbsd-overlay hack in the Makefile.linux hunk to make the build
+  pass.
 Author: Yuri D'Elia <wavexx@thregr.org>
 Forwarded: not-needed
 Updated: 2015-11-29
@@ -40,13 +42,8 @@ diff --git a/Makefile.linux b/Makefile.linux
 index c8f7c3b..8bcfde8 100644
 --- a/Makefile.linux
 +++ b/Makefile.linux
-@@ -1,5 +1,6 @@
--CPPFLAGS += -D_GNU_SOURCE -D_LINUX_PORT -Imissing
-+CPPFLAGS += -D_GNU_SOURCE -Imissing $(shell pkg-config --cflags libbsd-overlay)
+@@ -1,2 +1,3 @@
+ CPPFLAGS += -D_GNU_SOURCE -D_LINUX_PORT -Imissing
 +LDFLAGS += $(shell pkg-config --libs libbsd-ctor)
  MANPREFIX ?= ${PREFIX}/share/man
--EXTRA_SRC = missing/strlcpy.c missing/kqueue_inotify.c
-+EXTRA_SRC = missing/kqueue_inotify.c
- 
- include Makefile.bsd
 

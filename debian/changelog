@@ -2,6 +2,8 @@ entr (3.3-1~exp1) experimental; urgency=low
 
   * New upstream release (Closes: #788530)
     - Refresh patch to match the end result the patch created in 2.6
+    - Drop from patch libbsd-overlay hack for Makefile.linux to get
+      the program compiled.
 
  -- Otto Kekäläinen <otto@seravo.fi>  Sun, 29 Nov 2015 00:20:39 +0200
 
