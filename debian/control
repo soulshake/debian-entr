@@ -10,7 +10,7 @@ Vcs-Browser: http://anonscm.debian.org/gitweb/?p=collab-maint/entr.git
 
 Package: entr
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}
+Depends: ${misc:Depends}, ${shlibs:Depends}
 Description: Run arbitrary commands when files change
  The Event Notify Test Runner (entr) runs arbitrary commands when
  files change. Changes are detected through the kqueue/inotify
