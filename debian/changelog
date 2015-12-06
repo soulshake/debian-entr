@@ -1,3 +1,9 @@
+entr (3.3-1) unstable; urgency=low
+
+  * No-change upload to unstable
+
+ -- Otto Kekäläinen <otto@seravo.fi>  Sun, 06 Dec 2015 20:52:35 +0200
+
 entr (3.3-1~exp1) experimental; urgency=low
 
   * New upstream release (Closes: #788530)
