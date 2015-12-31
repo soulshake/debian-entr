@@ -1,5 +1,12 @@
 = Release History
 
+== 3.4: December 12, 2015
+
+ - Terminate the child process before exiting when the reload option is combined
+   with the directory watch option
+ - Direct users to http://entrproject.org/limits.html if the maximum number of
+   open files is exceeded
+
 == 3.3: October 23, 2015
 
  - Substitute '/_' only with regular files when using the directory watch option
