@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Otto Kekäläinen <otto@seravo.fi>
 Uploaders: Yuri D'Elia <wavexx@thregr.org>
 Build-Depends: debhelper (>= 9), libbsd-dev, pkg-config
-Standards-Version: 3.9.6
+Standards-Version: 3.9.8
 Homepage: http://entrproject.org/
 Vcs-Git: git://anonscm.debian.org/collab-maint/entr.git
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=collab-maint/entr.git
