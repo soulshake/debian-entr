@@ -6,8 +6,8 @@ Uploaders: Yuri D'Elia <wavexx@thregr.org>
 Build-Depends: debhelper (>= 9), libbsd-dev, pkg-config
 Standards-Version: 3.9.8
 Homepage: http://entrproject.org/
-Vcs-Git: git://anonscm.debian.org/collab-maint/entr.git
-Vcs-Browser: http://anonscm.debian.org/gitweb/?p=collab-maint/entr.git
+Vcs-Git: https://anonscm.debian.org/git/collab-maint/entr.git
+Vcs-Browser: https://anonscm.debian.org/cgit/collab-maint/entr.git
 
 Package: entr
 Architecture: any
