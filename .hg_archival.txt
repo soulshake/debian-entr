@@ -1,4 +1,4 @@
 repo: 49108c05f40cf0f2abceacff753c2df1cd22e1ec
-node: 5321b01c9dabf8cf6d5bacd10c56b126215a1fe3
+node: c15b0be493fc70e6e13c2a7fa451486aa1bc71a3
 branch: default
-tag: entr-3.4
+tag: entr-3.6

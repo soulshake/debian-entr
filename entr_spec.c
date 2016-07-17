@@ -49,6 +49,9 @@ struct {
 	} open;
 	struct {
 		int count;
+	} warn;
+	struct {
+		int count;
 	} exit;
 } ctx;
 
@@ -71,7 +74,7 @@ void fail() {
 
 void reset_state() {
 	int i;
-	int max_files = 4;
+	int max_files = 32;
 
 	/* getopt(3) keeps an external reference */
 	optind = 1;
@@ -100,10 +103,12 @@ void sighandler(int signum) {
 
 int
 fake_stat(const char *path, struct stat *sb) {
+	if (strncmp(path, "nosuch", 5) == 0)
+		return -1;
 	if (strncmp(path, "dir", 3) == 0)
-		sb->st_mode = S_IFDIR;
+		sb->st_mode = S_IFDIR | S_IRUSR;
 	else
-		sb->st_mode = S_IFREG;
+		sb->st_mode = S_IFREG | S_IRUSR;
 	return 0;
 }
 
@@ -190,6 +195,11 @@ fake_open(const char *path, int flags, ...) {
 }
 
 void
+fake_warnx(const char *msg, ...) {
+	ctx.warn.count++;
+}
+
+void
 fake_errx(int eval, const char *msg, ...) {
 	ctx.exit.count++;
 }
@@ -197,7 +207,7 @@ fake_errx(int eval, const char *msg, ...) {
 /* tests */
 
 /*
- * Read a list of use supplied files where input exceeds available watch
+ * Read a list of user supplied files where input exceeds available watch
  * descriptors
  */
 int process_input_01() {
@@ -216,7 +226,7 @@ int process_input_01() {
 }
 
 /*
- * Read a list of use supplied files and populate files array
+ * Read a list of user supplied files and populate files array
  */
 int process_input_02() {
 	int n_files;
@@ -234,7 +244,7 @@ int process_input_02() {
 }
 
 /*
- * Read a list of use supplied files and directories
+ * Read a list of user supplied files and directories
  */
 int process_input_03() {
 	int n_files;
@@ -257,6 +267,24 @@ int process_input_03() {
 	ok(files[2]->is_dir == 1); /* .     */
 	ok(files[3]->is_dir == 0); /* file2 */
 	ok(files[4]->is_dir == 0); /* file3 */
+	return 0;
+}
+
+/*
+ * Read a list of user supplied files where one of the files cannot be opened
+ */
+int process_input_04() {
+	char input[] = "file1\nnosuch1\nfile2";
+	FILE *fake;
+	int n_files;
+
+	fake = fmemopen(input, strlen(input), "r");
+	n_files = process_input(fake, files, 4);
+
+	ok(ctx.warn.count == 1);
+	ok(n_files == 2);
+	ok(strcmp(files[0]->fn, "file1") == 0);
+	ok(strcmp(files[1]->fn, "file2") == 0);
 	return 0;
 }
 
@@ -330,7 +358,6 @@ int watch_fd_exec_02() {
 	ok(ctx.event.Set[0].udata == files[0]);
 
 	ok(ctx.exec.count == 0);
-	ok(ctx.exec.file == 0);
 	ok(ctx.exit.count == 0);
 	return 0;
 }
@@ -585,6 +612,33 @@ int watch_fd_exec_08() {
 }
 
 /*
+ * Make a file executable
+ */
+int watch_fd_exec_09() {
+	int kq = kqueue();
+	static char *argv[] = { "prog", "arg1", "arg2", NULL };
+
+	postpone_opt = 1;
+	strlcpy(files[0]->fn, "main.py", sizeof(files[0]->fn));
+	watch_file(kq, files[0]);
+	files[0]->mode = S_IFREG | S_IRUSR | S_IXUSR;
+
+	ctx.event.nlist = 1;
+	EV_SET(&ctx.event.List[0], files[0]->fd, EVFILT_VNODE, 0, NOTE_ATTRIB, 0, files[0]);
+
+	watch_loop(kq, argv);
+
+	ok(ctx.exec.count == 1);
+	ok(ctx.exec.file != 0);
+	ok(strcmp(ctx.exec.file, "prog") == 0);
+	ok(strcmp(ctx.exec.argv[0], "prog") == 0);
+	ok(strcmp(ctx.exec.argv[1], "arg1") == 0);
+	ok(strcmp(ctx.exec.argv[2], "arg2") == 0);
+	ok(ctx.exit.count == 0);
+	return 0;
+}
+
+/*
  * Parse command line arguments up to but not including the utility to execute
  */
 int set_options_01() {
@@ -800,12 +854,14 @@ int test_main(int argc, char *argv[]) {
 	xrealpath = fake_realpath;
 	xfree = fake_free;
 	xerrx = fake_errx;
+	xwarnx = fake_warnx;
 	xlist_dir = fake_list_dir;
 
 	/* all tests */
 	run(process_input_01);
 	run(process_input_02);
 	run(process_input_03);
+	run(process_input_04);
 	run(watch_fd_exec_01);
 	run(watch_fd_exec_02);
 	run(watch_fd_exec_03);
@@ -814,6 +870,7 @@ int test_main(int argc, char *argv[]) {
 	run(watch_fd_exec_06);
 	run(watch_fd_exec_07);
 	run(watch_fd_exec_08);
+	run(watch_fd_exec_09);
 	run(set_options_01);
 	run(set_options_02);
 	run(set_options_03);

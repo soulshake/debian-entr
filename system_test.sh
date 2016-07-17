@@ -31,14 +31,6 @@ function zz { sleep 0.25; }
 function setup { rm -f $tmp/*; touch $tmp/file{1,2}; zz; }
 tmp=$(cd $(mktemp -dt entr_system_test.XXXXXXXXXX); pwd -P)
 
-# rebuild
-
-[ -f entr ] || {
-	./configure
-	make clean
-	make
-}
-
 # required utilities
 
 utils="hg vim"
@@ -79,6 +71,17 @@ try "exec single shell utility and exit when a file is added to an implicit watc
 	wait $bgpid || assert "$?" "130"
 	assert "$(cat $tmp/exec.out)" "ping"
 	assert "$(cat $tmp/exec.err)" "entr: directory altered"
+
+try "exec single shell utility and exit when a subdirectory is added"
+	setup
+	ls -d $tmp | ./entr -dp sh -c 'echo ping' >$tmp/exec.out 2>$tmp/exec.err \
+	    || true &
+	bgpid=$! ; zz
+	mkdir $tmp/newdir
+	wait $bgpid || assert "$?" "130"
+	assert "$(cat $tmp/exec.out)" "ping"
+	assert "$(cat $tmp/exec.err)" "entr: directory altered"
+	rmdir $tmp/newdir
 
 try "exec single shell utility and exit when a file is added to a specific path"
 	setup
@@ -193,7 +196,7 @@ try "restart a server when a file is modified"
 	wait $bgpid || assert "$?" "130"
 	assert "$(cat $tmp/exec.out)" "$(printf 'started.\nstarted.')"
 
-try "Ensure that all shell subprocesses are terminated in restart mode"
+try "ensure that all shell subprocesses are terminated in restart mode"
 	setup
 	cat <<-SCRIPT > $tmp/go.sh
 	#!/bin/sh
@@ -227,7 +230,7 @@ try "exec single shell utility when two files change simultaneously"
 	wait $bgpid || assert "$?" "130"
 	assert "$(cat $tmp/exec.out)" "ping"
 
-try "exec shell utility on startup and after a file is changed"
+try "exec single shell utility on startup and when a file is changed"
 	setup
 	ls $tmp/file* | ./entr sh -c 'printf ping' > $tmp/exec.out &
 	bgpid=$! ; zz
@@ -235,6 +238,15 @@ try "exec shell utility on startup and after a file is changed"
 	kill -INT $bgpid
 	wait $bgpid || assert "$?" "130"
 	assert "$(cat $tmp/exec.out)" "pingping"
+
+try "exec a command if a file is made executable"
+	setup
+	ls $tmp/file* | ./entr -p echo /_ > $tmp/exec.out &
+	bgpid=$! ; zz
+	chmod +x $tmp/file2 ; zz
+	kill -INT $bgpid
+	wait $bgpid || assert "$?" "130"
+	assert "$(cat $tmp/exec.out)" "$tmp/file2"
 
 try "exec a command using the first file to change"
 	setup
