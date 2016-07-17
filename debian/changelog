@@ -3,6 +3,7 @@ entr (3.6-1) unstable; urgency=low
   * Imported Upstream version 3.6
   * Standards-Version 3.9.8 (no changes needed)
   * Switch Vcs-Git and Vcs-Browser to https
+  * Ship upstream changelog
 
  -- Yuri D'Elia <wavexx@thregr.org>  Sun, 17 Jul 2016 19:40:49 +0200
 
