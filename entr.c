@@ -40,7 +40,7 @@
 
 /* events to watch for */
 
-#define NOTE_ALL NOTE_DELETE|NOTE_WRITE|NOTE_RENAME|NOTE_TRUNCATE
+#define NOTE_ALL NOTE_DELETE|NOTE_WRITE|NOTE_RENAME|NOTE_TRUNCATE|NOTE_ATTRIB
 
 /* shortcuts */
 
@@ -60,6 +60,7 @@ int (*xkevent)(int, const struct kevent *, int, struct kevent *, int , const
 int (*xopen)(const char *path, int flags, ...);
 char * (*xrealpath)(const char *, char *);
 void (*xfree)(void *);
+void (*xwarnx)(const char *, ...);
 void (*xerrx)(int, const char *, ...);
 int (*xlist_dir)(char *);
 
@@ -115,6 +116,7 @@ main(int argc, char *argv[]) {
 	xopen = open;
 	xrealpath = realpath;
 	xfree = free;
+	xwarnx = warnx;
 	xerrx = errx;
 	xlist_dir = list_dir;
 
@@ -158,11 +160,10 @@ main(int argc, char *argv[]) {
 		watch_file(kq, files[i]);
 
 	/* Attempt to open a tty so that editors don't complain */
-	if ((ttyfd = xopen(_PATH_TTY, O_RDONLY)) == -1)
-		warn("can't open %s", _PATH_TTY);
+	ttyfd = xopen(_PATH_TTY, O_RDONLY);
 	if (ttyfd > STDIN_FILENO) {
 		if (dup2(ttyfd, STDIN_FILENO) != 0)
-			warn("can't dup2 to stdin");
+			xwarnx("can't dup2 to stdin");
 		close(ttyfd);
 	}
 
@@ -174,10 +175,8 @@ main(int argc, char *argv[]) {
 
 void
 usage() {
-	extern char *__progname;
 	fprintf(stderr, "release: %s\n", RELEASE);
-	fprintf(stderr, "usage: %s [-cdpr] utility [args, [/_], ...] < filenames\n",
-	    __progname);
+	fprintf(stderr, "usage: entr [-cdpr] utility [args, [/_], ...] < filenames\n");
 	exit(1);
 }
 
@@ -220,13 +219,16 @@ process_input(FILE *file, WatchFile *files[], int max_files) {
 		if (buf[0] == '\0')
 			continue;
 
-		if (xstat(buf, &sb) == -1)
-			err(1, "cannot stat '%s'", buf);
+		if (xstat(buf, &sb) == -1) {
+			xwarnx("unable to stat '%s'", buf);
+			continue;
+		}
 		if (S_ISREG(sb.st_mode) != 0) {
 			files[n_files] = malloc(sizeof(WatchFile));
 			strlcpy(files[n_files]->fn, buf, MEMBER_SIZE(WatchFile, fn));
 			files[n_files]->is_dir = 0;
 			files[n_files]->file_count = 0;
+			files[n_files]->mode = sb.st_mode;
 			n_files++;
 		}
 		/* also watch the directory if it's not already in the list */
@@ -244,6 +246,7 @@ process_input(FILE *file, WatchFile *files[], int max_files) {
 				    MEMBER_SIZE(WatchFile, fn));
 				files[n_files]->is_dir = 1;
 				files[n_files]->file_count = xlist_dir(path);
+				files[n_files]->mode = sb.st_mode;
 				n_files++;
 			}
 		}
@@ -259,7 +262,7 @@ int list_dir(char *dir) {
 	int count = 0;
 
 	if (dfd == NULL)
-		errx(1, "Unable to open directory: %s", dir);
+		errx(1, "unable to open directory: '%s'", dir);
 	while((dp = readdir(dfd)) != NULL)
 		if (dp->d_name[0] != '.')
 			count++;
@@ -342,7 +345,7 @@ run_utility(char *argv[]) {
 
 	if (pid == 0) {
 		if (clear_opt == 1)
-			system("/usr/bin/clear");
+			(void) system("/usr/bin/clear");
 		/* Set process group so subprocess can be signaled */
 		if (restart_opt == 1)
 			setpgid(0, getpid());
@@ -384,12 +387,18 @@ watch_file(int kq, WatchFile *file) {
 		else break;
 	}
 	if (file->fd == -1)
-		err(1, "cannot open `%s'", file->fn);
+		err(1, "cannot open '%s'", file->fn);
 
 	EV_SET(&evSet, file->fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_ALL, 0,
 	    file);
-	if (xkevent(kq, &evSet, 1, NULL, 0, NULL) == -1)
-		err(1, "failed to register VNODE event");
+	if (xkevent(kq, &evSet, 1, NULL, 0, NULL) == -1) {
+		if (errno == ENOSPC)
+			errx(1, "Unable to allocate memory for kernel queue."
+			    " Please consult"
+			    " http://entrproject.org/limits.html");
+		else
+			err(1, "failed to register VNODE event");
+	}
 }
 
 /*
@@ -435,6 +444,7 @@ watch_loop(int kq, char *argv[]) {
 	int do_exec = 0;
 	int dir_modified = 0;
 	int leading_edge_set = 0;
+	struct stat sb;
 
 	leading_edge = files[0]; /* default */
 	if (postpone_opt == 0)
@@ -495,6 +505,13 @@ main:
 			if ((dir_modified > 0) && (restart_opt == 1))
 				continue;
 			do_exec = 1;
+		}
+		if (evList[i].fflags & NOTE_ATTRIB &&
+		    S_ISREG(file->mode) != 0 &&
+		    xstat(file->fn, &sb) == 0 &&
+		    file->mode != sb.st_mode) {
+			do_exec = 1;
+			file->mode = sb.st_mode;
 		}
 	}
 
