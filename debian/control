@@ -1,8 +1,8 @@
 Source: entr
 Section: misc
 Priority: optional
-Maintainer: Otto Kekäläinen <otto@seravo.fi>
-Uploaders: Yuri D'Elia <wavexx@thregr.org>
+Maintainer: Yuri D'Elia <wavexx@thregr.org>
+Uploaders: Otto Kekäläinen <otto@debian.org>
 Build-Depends: debhelper (>= 9), libbsd-dev, pkg-config
 Standards-Version: 3.9.8
 Homepage: http://entrproject.org/
