@@ -1,3 +1,13 @@
+entr (3.7-1) unstable; urgency=low
+
+  * New upstream version 3.7:
+    - Terminate subprocess in restart mode if a file under watch disappears
+    - Allow NOTE_ATTRIB to set '/_' only if file mode changes
+    - New '-s' option executes commands using $SHELL -c
+    - Print usage and exit if input is from a terminal instead of a pipe
+
+ -- Yuri D'Elia <wavexx@thregr.org>  Tue, 14 Mar 2017 12:19:55 +0100
+
 entr (3.6-1) unstable; urgency=low
 
   * Imported Upstream version 3.6
