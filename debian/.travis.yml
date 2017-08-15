@@ -1,2 +1,15 @@
+sudo: required
+language: generic
+
+services:
+  - docker
+
 before_install:
   - rm .travis.yml
+
+script:
+  - wget -O- http://travis.debian.net/script.sh | sh -
+
+branches:
+  except:
+    - /^debian\/\d/
