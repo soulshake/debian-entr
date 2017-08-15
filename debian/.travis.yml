@@ -4,10 +4,8 @@ language: generic
 services:
   - docker
 
-#before_install:
-  #- rm .travis.yml
-
 script:
+  - rm .travis.yml
   - wget -O- http://travis.debian.net/script.sh | sh -
 
 branches:
