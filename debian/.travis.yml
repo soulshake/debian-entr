@@ -1,0 +1,5 @@
+before_install:
+  - ln -s debian/.travis.yml .
+
+before_script:
+  - rm .travis.yml
